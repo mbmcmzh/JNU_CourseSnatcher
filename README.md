@@ -5,4 +5,4 @@ JNU 暨南大学 抢课脚本
 2.现在可通过网页进行登录验证获取cookie和token
 3.新增选课轮次、校区的候选框，新增课程代码输入框
 
-![images/ui.png]
+![示例图片](images/ui.png)
