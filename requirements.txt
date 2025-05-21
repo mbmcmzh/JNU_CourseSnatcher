@@ -1,0 +1,2 @@
+Requests==2.32.3
+selenium_wire==5.1.0
