@@ -1,0 +1,35 @@
+# 排除构建相关文件和目录
+build/
+dist/
+resources/
+build.py
+*.spec
+
+# 排除文档文件
+README.md
+readme.md
+README.txt
+readme.txt
+
+# 排除Chrome浏览器文件（太大）
+chrome/
+chromedriver.exe
+
+# 排除Python缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 排除IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 排除日志文件
+*.log
+
+# 排除临时文件
+*.tmp
+*.temp 
