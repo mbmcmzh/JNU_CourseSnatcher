@@ -5,8 +5,7 @@ resources/
 build.py
 *.spec
 
-# 排除文档文件
-README.md
+# 排除其他文档文件（但保留项目README）
 readme.md
 README.txt
 readme.txt
