@@ -38,6 +38,8 @@ git clone https://github.com/mbmcmzh/JNU_CourseSnatcher.git
 - 网络连接
 
 ## 使用方法
+注意！添加课程请输入班号，而不要输入课程号！
+
 
 ### 图形界面版本
 ```bash
