@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
         try:
             self.headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-                "cookie": self.captured_data["request_headers"]["cookie"],
+                "Cookie": self.captured_data["request_headers"]["Cookie"],
                 "token": self.captured_data["request_headers"]["token"],
             }
             payload_str = self.captured_data["request_payload"]

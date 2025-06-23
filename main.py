@@ -25,7 +25,7 @@ class RequestSniffer:
         """
         初始化嗅探器。
         """
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"
+        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36 Edg/127.0.0.0"
 
     def _init_browser(self):
         """
@@ -341,7 +341,7 @@ def main():
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-            "cookie": captured_data["request_headers"]["cookie"],
+            "Cookie": captured_data["request_headers"]["Cookie"],
             "token": captured_data["request_headers"]["token"],
         }
 
