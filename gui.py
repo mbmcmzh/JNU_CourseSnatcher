@@ -1,6 +1,7 @@
 import sys
 import time
 import json
+from urllib.parse import parse_qs
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QTextEdit, QLineEdit, QLabel, QListWidget, 
@@ -9,10 +10,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QThread, QObject, pyqtSignal, pyqtSlot, Qt
 from PyQt6.QtGui import QIcon
 
-# 从 main.py 导入核心逻辑
-# 确保 main.py 和 gui.py 在同一个目录下
+# 从主脚本导入核心逻辑
+# 确保两个脚本位于同一目录下
 try:
-    from main import RequestSniffer, course_search, course_addParam_generate, course_snatch, BASE_URL
+    from main import RequestSniffer, course_search, course_addParam_generate, course_snatch, BASE_URL, get_header_case_insensitive
 except ImportError:
     print("错误: 无法从 main.py 导入模块。请确保 main.py 和 gui.py 在同一个目录下。")
     sys.exit(1)
@@ -20,7 +21,7 @@ except ImportError:
 # --- 后台工作线程定义 ---
 
 class Stream(QObject):
-    """用于重定向stdout的流对象"""
+    """用于重定向标准输出流的对象"""
     newText = pyqtSignal(str)
 
     def write(self, text):
@@ -30,7 +31,7 @@ class Stream(QObject):
         pass
 
 class SnifferWorker(QObject):
-    """负责执行网络嗅探任务的Worker"""
+    """负责执行网络嗅探任务的工作对象"""
     finished = pyqtSignal()
     log = pyqtSignal(str)
     data_captured = pyqtSignal(dict)
@@ -63,7 +64,7 @@ class SnifferWorker(QObject):
             self.finished.emit()
 
 class SnatcherWorker(QObject):
-    """负责执行抢课任务的Worker"""
+    """负责执行抢课任务的工作对象"""
     finished = pyqtSignal()
     log = pyqtSignal(str)
     error = pyqtSignal(str)
@@ -233,13 +234,13 @@ class MainWindow(QMainWindow):
         self.set_ui_state('initial')
 
     def _redirect_stdout(self):
-        """重定向print输出到日志窗口"""
+        """将打印输出重定向到日志窗口"""
         sys.stdout = Stream(newText=self.update_log)
         sys.stderr = Stream(newText=self.update_log)
         print("界面初始化完成。")
 
     def set_ui_state(self, state):
-        """根据状态设置UI控件的可用性"""
+        """根据状态设置界面控件的可用性"""
         if state == 'initial':
             self.start_sniffing_btn.setEnabled(True)
             self.repeat_snatch_spinbox.setEnabled(True)
@@ -304,14 +305,24 @@ class MainWindow(QMainWindow):
     def on_data_captured(self, data):
         self.captured_data = data
         try:
+            request_headers = self.captured_data.get('request_headers', {})
+            cookie = get_header_case_insensitive(request_headers, 'cookie')
+            token = get_header_case_insensitive(request_headers, 'token')
+            missing_headers = [name for name, value in (('cookie', cookie), ('token', token)) if not value]
+            if missing_headers:
+                available_keys = ', '.join(request_headers.keys())
+                raise KeyError(f"未找到请求头: {', '.join(missing_headers)}。实际可用请求头: {available_keys}")
+
             self.headers = {
                 "User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-                "cookie": self.captured_data['request_headers']['cookie'],
-                "token": self.captured_data['request_headers']['token']
+                "cookie": cookie,
+                "token": token
             }
-            payload_str = self.captured_data['request_payload']
-            self.student_code = payload_str.split('xh=')[1].split('&')[0]
-            self.electiveBatchCode = payload_str.split('xklcdm=')[1].split('&')[0]
+            payload_params = parse_qs(self.captured_data.get('request_payload', ''))
+            self.student_code = payload_params.get('xh', [None])[0]
+            self.electiveBatchCode = payload_params.get('xklcdm', [None])[0]
+            if not self.student_code or not self.electiveBatchCode:
+                raise ValueError("无法从请求体解析到 xh 或 xklcdm，请确认触发了正确请求。")
             self.update_log(f"学号: {self.student_code}")
             self.update_log(f"选课批次代码: {self.electiveBatchCode}")
             self.update_log("凭据解析成功, 现在可以添加课程班号并开始抢课。")
@@ -380,8 +391,8 @@ class MainWindow(QMainWindow):
     def stop_snatching(self):
         if self.snatcher_worker and self.snatcher_thread and self.snatcher_thread.isRunning():
             self.snatcher_worker.stop()
-            # The worker will finish its current step and then stop,
-            # which will trigger the finished signal and cleanup.
+            # 工作线程会先完成当前步骤再停止，
+            # 然后触发结束信号并执行清理流程。
 
     def on_snatcher_finished(self):
         """抢课任务完成后进行清理和UI更新。"""
