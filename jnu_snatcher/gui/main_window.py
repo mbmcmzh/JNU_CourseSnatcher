@@ -20,6 +20,12 @@ from PyQt6.QtWidgets import (
 from ..config import DEFAULT_BROWSER_WAIT, DEFAULT_SNATCH_ROUNDS
 from .workers import SnatchWorker, SnifferWorker
 
+# 必须在 QApplication 创建前完成 QtWebEngine 的导入
+try:
+    from .embedded_browser import EmbeddedLoginDialog
+except ImportError:
+    EmbeddedLoginDialog = None
+
 STATE_INITIAL = "initial"
 STATE_SNIFFING = "sniffing"
 STATE_READY = "ready"
@@ -190,10 +196,17 @@ class MainWindow(QMainWindow):
         # 第一步：登录
         login_card, login_layout = _card(
             "第一步 · 登录获取凭据",
-            "启动内置浏览器并登录选课系统，程序会自动捕获抢课所需凭据。",
+            "在应用内登录选课系统，程序会自动捕获抢课所需凭据。",
         )
+        self.embedded_btn = QPushButton("登录选课系统")
+        self.embedded_btn.setObjectName("primary")
+        self.embedded_btn.clicked.connect(self.start_embedded_login)
+        if EmbeddedLoginDialog is None:
+            self.embedded_btn.setToolTip("未安装 PyQt6-WebEngine，无法使用内嵌浏览器")
+        login_layout.addWidget(self.embedded_btn)
+
         wait_row = QHBoxLayout()
-        wait_label = QLabel("登录等待时间（秒）")
+        wait_label = QLabel("外置浏览器等待时间（秒）")
         wait_label.setObjectName("fieldLabel")
         self.wait_spin = QSpinBox()
         self.wait_spin.setRange(30, 600)
@@ -203,8 +216,7 @@ class MainWindow(QMainWindow):
         wait_row.addWidget(self.wait_spin)
         login_layout.addLayout(wait_row)
 
-        self.sniff_btn = QPushButton("启动浏览器登录")
-        self.sniff_btn.setObjectName("primary")
+        self.sniff_btn = QPushButton("备用：外置 Chrome 登录")
         self.sniff_btn.clicked.connect(self.start_sniffing)
         login_layout.addWidget(self.sniff_btn)
         column.addWidget(login_card)
@@ -299,6 +311,7 @@ class MainWindow(QMainWindow):
         is_ready = state == STATE_READY
         is_snatching = state == STATE_SNATCHING
 
+        self.embedded_btn.setEnabled(is_initial and EmbeddedLoginDialog is not None)
         self.sniff_btn.setEnabled(is_initial)
         self.wait_spin.setEnabled(is_initial)
         self.class_input.setEnabled(is_ready)
@@ -327,7 +340,26 @@ class MainWindow(QMainWindow):
         self.show_error(text)
         QMessageBox.warning(self, "发生错误", text)
 
-    # ---------- 第一步：嗅探 ----------
+    # ---------- 第一步：内嵌浏览器登录 ----------
+
+    def start_embedded_login(self):
+        if EmbeddedLoginDialog is None:
+            self._show_error_dialog("未安装 PyQt6-WebEngine，请使用外置 Chrome 登录。")
+            return
+
+        self._set_state(STATE_SNIFFING)
+        self.append_log("已打开内嵌浏览器，请完成登录...")
+
+        dialog = EmbeddedLoginDialog(self)
+        dialog.log.connect(self.append_log)
+        dialog.credentials_captured.connect(self.on_credentials_ready)
+        dialog.exec()
+
+        if not self.credentials:
+            self.append_log("登录窗口已关闭，未捕获到凭据。")
+        self._set_state(STATE_READY if self.credentials else STATE_INITIAL)
+
+    # ---------- 第一步（备用）：外置浏览器嗅探 ----------
 
     def start_sniffing(self):
         self._set_state(STATE_SNIFFING)

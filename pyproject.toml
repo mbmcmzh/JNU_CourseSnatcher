@@ -5,6 +5,7 @@ description = "暨南大学抢课助手：自动捕获登录凭据并批量抢�
 requires-python = ">=3.9"
 dependencies = [
     "PyQt6",
+    "PyQt6-WebEngine",
     "requests",
     "selenium-wire",
     "blinker<1.6",

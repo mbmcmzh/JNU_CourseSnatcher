@@ -319,4 +319,10 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 QMessageBox {{
     background: {SURFACE};
 }}
+
+/* ---------- 内嵌登录对话框 ---------- */
+QDialog {{
+    background: {BG};
+    border: 1px solid {BORDER};
+}}
 """
