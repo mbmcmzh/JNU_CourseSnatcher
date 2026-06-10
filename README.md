@@ -5,10 +5,27 @@
 ## 功能特点
 
 - 🚀 **自动抢课**：自动监听网络请求，获取登录信息后批量抢课
-- 💻 **图形界面**：提供友好的 GUI 界面，操作简单直观
+- 💻 **图形界面**：极简现代风格的 GUI 界面，操作简单直观
 - 🔄 **多轮抢课**：支持设置多轮抢课，提高成功率
 - 🌐 **内置浏览器**：包含 Chrome 浏览器，无需额外安装
 - 📝 **详细日志**：显示抢课过程和结果，便于调试
+
+## 项目结构
+
+```
+jnu_snatcher/          核心包
+├── config.py          全局配置与接口地址
+├── sniffer.py         浏览器嗅探器（捕获登录凭据）
+├── credentials.py     凭据解析
+├── api.py             选课系统接口封装
+└── gui/               PyQt6 图形界面
+    ├── theme.py       全局主题样式
+    ├── workers.py     后台工作线程
+    └── main_window.py 主窗口
+main.py                命令行入口
+gui.py                 图形界面入口
+tests/                 单元测试
+```
 
 ## 下载和使用
 
@@ -55,6 +72,13 @@ python main.py
 
 ```bash
 pip install -r requirements.txt
+```
+
+## 运行测试
+
+```bash
+pip install -r requirements-dev.txt
+pytest
 ```
 
 ## 注意事项

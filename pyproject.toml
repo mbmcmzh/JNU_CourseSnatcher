@@ -1,0 +1,17 @@
+[project]
+name = "jnu-course-snatcher"
+version = "2.0.0"
+description = "暨南大学抢课助手：自动捕获登录凭据并批量抢课"
+requires-python = ">=3.9"
+dependencies = [
+    "PyQt6",
+    "requests",
+    "selenium-wire",
+    "blinker<1.6",
+    "pyOpenSSL<26.2",
+    "setuptools<81",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

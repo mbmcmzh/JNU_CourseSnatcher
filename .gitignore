@@ -26,6 +26,11 @@ __pycache__/
 *.swp
 *.swo
 
+# 排除AI助手配置与测试缓存
+.claude/
+.cursor/
+.pytest_cache/
+
 # 排除日志文件
 *.log
 

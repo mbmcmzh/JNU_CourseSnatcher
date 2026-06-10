@@ -1,393 +1,81 @@
-import time
-import json
-import os
-import atexit
-import shutil
-import sys
-import tempfile
-from urllib.parse import parse_qs
-import urllib3
-import requests
-from seleniumwire import webdriver
+"""暨南大学抢课助手 —— 命令行入口。"""
 
-# 禁用证书告警
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-BASE_URL = "https://jwxk.jnu.edu.cn/"
+from jnu_snatcher.api import ApiError, CourseClient
+from jnu_snatcher.config import BASE_URL, DEFAULT_BROWSER_WAIT, DEFAULT_SNATCH_ROUNDS, XKXF_URL
+from jnu_snatcher.credentials import CredentialError, Credentials
+from jnu_snatcher.sniffer import BrowserStartupError, RequestSniffer
 
 
-def get_header_case_insensitive(headers, key):
-    """
-    从请求头中按大小写不敏感方式获取字段值。
-    """
-    if not headers:
-        return None
+def _collect_class_ids():
+    """交互式收集教学班号列表。"""
+    class_ids = []
+    while True:
+        value = input("请输入课程的班号（输入空值结束，注意是教学班号而非课程号）: ").strip()
+        if not value:
+            if class_ids:
+                return class_ids
+            print("至少需要输入一个班号。")
+            continue
+        if value in class_ids:
+            print(f"班号 {value} 已在列表中。")
+            continue
+        class_ids.append(value)
 
-    key_lower = key.lower()
-    for header_key, header_value in headers.items():
-        if str(header_key).lower() == key_lower:
-            return header_value
-    return None
-
-class RequestSniffer:
-    """
-    一个模块化的网络请求嗅探器，用于捕获指定URL的请求和响应数据。
-    模仿 core.py 的浏览器初始化方式，使用 selenium-wire 捕获网络流量。
-    """
-    
-    def __init__(self):
-        """
-        初始化嗅探器。
-        """
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"
-
-    def _init_browser(self):
-        """
-        初始化浏览器驱动。
-        - 优先使用内置浏览器 (./chrome/chrome.exe)
-        - 仅使用浏览器内核
-        - 为每个实例创建唯一的用户数据目录
-        - 增加稳定性参数防止崩溃
-        - 注册退出时自动清理临时目录
-        - 解决抓包库打包后证书文件缺失问题
-        """
-        # 为浏览器创建唯一的临时用户数据目录
-        pid = os.getpid()
-        timestamp = int(time.time())
-        # 使用更唯一的目录名，包含时间戳
-        chrome_temp_dir = os.path.join(tempfile.gettempdir(), f"jnu_sniffer_chrome_{pid}_{timestamp}")
-
-        # 启动前强制清理旧的临时目录
-        shutil.rmtree(chrome_temp_dir, ignore_errors=True)
-        os.makedirs(chrome_temp_dir, exist_ok=True)
-
-        # 注册退出时清理函数
-        def _clean_temp_dirs():
-            try:
-                if os.path.exists(chrome_temp_dir):
-                    shutil.rmtree(chrome_temp_dir, ignore_errors=True)
-                    print(f"临时目录 {chrome_temp_dir} 已清理。")
-            except Exception as e:
-                print(f"清理临时目录失败: {e}")
-
-        atexit.register(_clean_temp_dirs)
-
-        # 配置抓包库选项
-        seleniumwire_options = {
-            'disable_encoding': True,
-            'verify_ssl': False,
-            'suppress_connection_errors': True,
-            'disable_capture': False,
-        }
-
-        # 尝试启动浏览器
-        try:
-            print("正在启动浏览器...")
-            chrome_options = webdriver.ChromeOptions()
-            
-            # --- 定位内置浏览器 ---
-            # 检查是否在打包环境中运行
-            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-                # 在打包后运行
-                base_path = sys._MEIPASS
-                print(f"程序运行在打包环境中，基础路径: {base_path}")
-            else:
-                # 在开发环境中作为脚本运行
-                base_path = os.path.dirname(os.path.abspath(__file__))
-                print(f"程序以脚本方式运行，基础路径: {base_path}")
-
-            chrome_exe_path = os.path.join(base_path, 'chrome', 'chrome.exe')
-            
-            print(f"正在检查内置浏览器路径: {chrome_exe_path}")
-
-            if os.path.exists(chrome_exe_path):
-                print(f"✅ 找到内置浏览器，将使用该版本: {chrome_exe_path}")
-                chrome_options.binary_location = chrome_exe_path
-            else:
-                print("⚠️ 未找到内置浏览器，将尝试使用系统已安装的浏览器。")
-                print("   如需使用内置版本，请确保浏览器文件夹位于程序根目录下的 'chrome' 文件夹中（最终路径为 chrome/chrome.exe）。")
-            # --- 内置浏览器定位结束 ---
-            
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # 基础参数
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--ignore-ssl-errors')
-            chrome_options.add_argument('--allow-running-insecure-content')
-            chrome_options.add_argument('--disable-web-security')
-            
-            # 安全和稳定性参数
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-            
-            # 浏览器特定参数
-            chrome_options.add_argument('--disable-background-timer-throttling')
-            chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-            chrome_options.add_argument('--disable-renderer-backgrounding')
-            chrome_options.add_argument('--disable-background-networking')
-            
-            # 为浏览器设置唯一的用户数据目录，解决打包后的目录冲突问题
-            chrome_options.add_argument(f'--user-data-dir={chrome_temp_dir}')
-            # 强制设置磁盘缓存目录
-            chrome_options.add_argument(f'--disk-cache-dir={chrome_temp_dir}/cache')
-            # 禁用首次运行体验
-            chrome_options.add_argument('--no-first-run')
-            chrome_options.add_argument('--no-default-browser-check')
-            
-            print(f"浏览器临时目录: {chrome_temp_dir}")
-            
-            return webdriver.Chrome(
-                options=chrome_options,
-                seleniumwire_options=seleniumwire_options
-            )
-        except Exception as e:
-            print(f"浏览器启动失败: {e}")
-            print("=" * 60)
-            print("错误：未检测到可用浏览器")
-            print("请按以下步骤安装谷歌浏览器：")
-            print("1. 访问谷歌浏览器官方下载页面：https://www.google.com/chrome/")
-            print("2. 下载适合您操作系统的版本")
-            print("3. 安装完成后重新运行程序")
-            print("=" * 60)
-            raise Exception("浏览器未安装或无法启动。请安装浏览器后重试。")
-
-    def sniff_requests(self, visit_url, target_url, timeout=60):
-        """
-        启动浏览器，访问页面，并监听捕获特定地址的请求。
-
-        参数:
-            visit_url (str): 需要在浏览器中打开的初始网页地址。
-            target_url (str): 需要监听并捕获其请求/响应数据的目标地址。
-            timeout (int): 等待捕获请求的超时时间（秒）。
-
-        返回:
-            dict 或 None: 成功捕获时返回包含请求详情的字典，否则返回 None。
-        """
-        print(f"正在启动浏览器并访问: {visit_url}")
-        driver = self._init_browser()
-        driver.get(visit_url)
-
-        print(f"\n浏览器已启动。请在浏览器中进行必要操作（如登录）以触发目标请求。")
-        print(f"正在监听目标地址（或包含该片段的地址）: {target_url}")
-        print(f"脚本将等待最多 {timeout} 秒...")
-
-        start_time = time.time()
-        captured_data = None
-
-        try:
-            while time.time() - start_time < timeout:
-                # 遍历所有捕获到的请求
-                for request in driver.requests:
-                    if request.response and target_url in request.url:
-                        print(f"\n--- 捕获到目标请求: {request.url} ---")
-
-                        # 1. 提取请求标头
-                        # 统一将请求头键名转换为小写，避免后续读取时受大小写影响
-                        headers = {str(k).lower(): v for k, v in dict(request.headers).items()}
-
-                        # 2. 提取请求体
-                        payload_str = "无"
-                        if request.body:
-                            try:
-                                # 尝试按结构化文本格式解析和美化
-                                payload_json = json.loads(request.body.decode('utf-8'))
-                                payload_str = json.dumps(payload_json, indent=2, ensure_ascii=False)
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                # 如果不是结构化文本，则以纯文本显示
-                                payload_str = request.body.decode('utf-8', errors='ignore')
-
-                        # 3. 提取响应内容
-                        response_body_str = "无"
-                        if request.response.body:
-                            try:
-                                # 尝试按结构化文本格式解析和美化
-                                response_json = json.loads(request.response.body.decode('utf-8'))
-                                response_body_str = json.dumps(response_json, indent=2, ensure_ascii=False)
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                # 如果不是结构化文本，则以纯文本显示
-                                response_body_str = request.response.body.decode('utf-8', errors='ignore')
-
-                        captured_data = {
-                            "url": request.url,
-                            "request_headers": headers,
-                            "request_payload": payload_str,
-                            "response_body": response_body_str
-                        }
-                        
-                        # 清除已处理的请求，防止重复捕获
-                        del driver.requests
-                        
-                        # 跳出内层循环
-                        break
-                
-                if captured_data:
-                    # 如果已捕获到数据，跳出外层循环
-                    break
-
-                time.sleep(1)
-            
-            if not captured_data:
-                print(f"\n在 {timeout} 秒内未捕获到目标地址的请求。")
-
-        finally:
-            print("\n操作完成，正在关闭浏览器...")
-            driver.quit()
-        
-        return captured_data
-
-def course_search(headers, student_code, electiveBatchCode, queryContent, teachingClassType='QXKC'):
-    
-    publicCourse_url = f"{BASE_URL}xsxkapp/sys/xsxkapp/elective/publicCourse.do"
-    
-    query_settings_dict = {
-        "data":{
-            "studentCode":student_code,
-            "campus":"",
-            "electiveBatchCode":electiveBatchCode,
-            "isMajor":"1",
-            "teachingClassType":teachingClassType,
-            "isMajor":"1",
-            "queryContent":queryContent
-        },
-        "pageSize":"10",
-        "pageNumber":"0",
-        "order":""
-    }
-
-    query_settings_json = json.dumps(query_settings_dict, separators=(',', ':'))
-
-    payload = {
-        'querySetting': query_settings_json
-    }
-
-    try:
-        response = requests.post(publicCourse_url, headers=headers, data=payload)
-        return response.json()
-    except Exception as e:
-        print(f"请求失败: {e}")
-        return None
-
-def course_addParam_generate(course_info_list, student_code, electiveBatchCode, ):
-    addParam_list = []
-    
-    for course_info in course_info_list:
-        addParam_dict = {
-            "data":{
-                "operationType":"1",
-                "studentCode":student_code,
-                "electiveBatchCode":electiveBatchCode,
-                "teachingClassId":course_info['dataList'][0]['teachingClassID'],
-                "isMajor":"1",
-                "campus":course_info['dataList'][0]['campus'],
-                "teachingClassType":"QXKC"
-            }
-        }
-
-        addParam_json = json.dumps(addParam_dict, separators=(',', ':'))
-
-        payload = {
-            'addParam': addParam_json
-        }
-
-        addParam_list.append(payload)
-        print(f"成功添加课程 "
-              f"名称:{course_info['dataList'][0]['courseName']}, "
-              f"课程号:{course_info['dataList'][0]['courseNumber']}, "
-              f"班号:{course_info['dataList'][0]['teachingClassID']}, "
-              f"校区:{course_info['dataList'][0]['campusName']}, "
-              f"教师:{course_info['dataList'][0]['teacherName']}, "
-              f"教学地点:{course_info['dataList'][0]['teachingPlace']}")
-
-    return addParam_list
-    
-def course_snatch(headers, addParam_list):
-    snatch_url = f'{BASE_URL}xsxkapp/sys/xsxkapp/elective/volunteer.do'
-
-    for addParam in addParam_list:
-        response = requests.post(snatch_url, headers=headers, data=addParam)
-        print(response.json())
-        time.sleep(1)
 
 def main():
-    repeat_snatch_time = 3 # 重复抢课次数
-    Browser_wait_time = 120 # 浏览器等待时间，超过这个时间则认为浏览器没有正常启动
-
-    # 监听并获取学号、抢课轮次、身份凭据和令牌
-    xkxf_URL = f"{BASE_URL}xsxkapp/sys/xsxkapp/student/xkxf.do"
-    
     sniffer = RequestSniffer()
-    # 启动嗅探器，超时时间设置为120秒
-    captured_data = sniffer.sniff_requests(
-        visit_url=BASE_URL, 
-        target_url=xkxf_URL,
-        timeout=Browser_wait_time 
-    )
+    try:
+        captured_data = sniffer.sniff_requests(
+            visit_url=BASE_URL,
+            target_url=XKXF_URL,
+            timeout=DEFAULT_BROWSER_WAIT,
+        )
+    except BrowserStartupError as exc:
+        print(f"错误: {exc}")
+        return
 
-    if captured_data:
-        print("\n\n--- 成功捕获到请求信息 ---")
-        
-        
-        request_headers = captured_data.get('request_headers', {})
-        cookie = get_header_case_insensitive(request_headers, 'cookie')
-        token = get_header_case_insensitive(request_headers, 'token')
-        missing_headers = [name for name, value in (('cookie', cookie), ('token', token)) if not value]
-        if missing_headers:
-            available_keys = ', '.join(request_headers.keys())
-            print(f"缺少必要请求头: {', '.join(missing_headers)}")
-            print(f"当前捕获到的请求头键: {available_keys}")
-            return
+    if not captured_data:
+        print("未能捕获到登录凭据，请检查网络连接或重试。")
+        return
 
-        headers = {
-            "User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-            "cookie": cookie,
-            "token": token
-        }
+    try:
+        credentials = Credentials.from_capture(captured_data)
+    except CredentialError as exc:
+        print(f"凭据解析失败: {exc}")
+        return
 
-        # 输入课程班号
-        course_classid_list = []
-        while True:
-            queryContent_input = input("请输入课程的班号(输入空值结束，注意不要输入课程号，输入的班号是教学班号):")
-            if queryContent_input == '':
-                if len(course_classid_list) == 0:
-                    print("至少需要输入一个班号")
-                    continue
-                else:
-                    break
-            else:
-                course_classid_list.append(queryContent_input)
-        
-        payload_params = parse_qs(captured_data.get('request_payload', ''))
-        student_code = payload_params.get('xh', [None])[0]
-        electiveBatchCode = payload_params.get('xklcdm', [None])[0]
-        if not student_code or not electiveBatchCode:
-            print("无法从请求体中解析到 xh 或 xklcdm，请确认已触发正确请求。")
-            return
-        
-        # 获取课程信息
-        course_info_list = []
-        for queryContent in course_classid_list:
-            course_info = course_search(headers, student_code, electiveBatchCode, queryContent)
-            course_info_list.append(course_info)
+    print(f"凭据解析成功 — 学号: {credentials.student_code}，"
+          f"选课批次: {credentials.elective_batch_code}")
 
-        # 生成添加课程的参数
-        addParam_list = course_addParam_generate(course_info_list, student_code, electiveBatchCode)
-        print("课程信息获取完成，是否开始抢课（输入 是 开始，其他输入取消）：")
-        if input().strip() == '是':
-        # 开始抢课
-            for i in range(repeat_snatch_time):
-                course_snatch(headers, addParam_list)
-                print(f"抢课轮次{i+1}完成")
-        print("抢课结束")
+    client = CourseClient(credentials)
+
+    courses = []
+    for class_id in _collect_class_ids():
+        try:
+            course = client.search_class(class_id)
+        except ApiError as exc:
+            print(f"跳过: {exc}")
+            continue
+        courses.append(course)
+        print(f"已添加课程 -> {course.summary}")
+
+    if not courses:
+        print("没有可抢的课程，已退出。")
+        return
+
+    if input("课程信息获取完成，是否开始抢课？（输入 是 开始，其他输入取消）: ").strip() != "是":
+        print("已取消。")
+        return
+
+    def on_result(course, result):
+        print(f"[{course.name}] {result}")
+
+    for round_index in range(DEFAULT_SNATCH_ROUNDS):
+        client.snatch_round(courses, on_result=on_result)
+        print(f"抢课轮次 {round_index + 1}/{DEFAULT_SNATCH_ROUNDS} 完成")
+
+    print("抢课结束。")
 
 
-    else:
-        print("浏览器启动失败，请检查网络连接或浏览器配置")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-        

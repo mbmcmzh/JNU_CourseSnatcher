@@ -1,3 +1,6 @@
 PyQt6
 requests
-selenium-wire 
+selenium-wire
+blinker<1.6  # selenium-wire 5.x 依赖已移除的 blinker._saferef
+pyOpenSSL<26.2  # 26.2 移除了 X509.get_extension，selenium-wire 解密 HTTPS 需要
+setuptools<81  # selenium-wire 需要 pkg_resources（setuptools 81+ 已移除）
