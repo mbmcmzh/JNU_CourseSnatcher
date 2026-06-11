@@ -8,7 +8,6 @@
 """
 
 import json
-import os
 import re
 
 from PyQt6.QtCore import QRectF, Qt, QUrl, pyqtSignal
@@ -16,7 +15,6 @@ from PyQt6.QtGui import QPainterPath, QRegion
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import (
-    QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -25,7 +23,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..config import BASE_URL, LOGIN_CACHE_DIR, LOGIN_PROFILE_DIR, XKXF_URL
+from ..config import BASE_URL, XKXF_URL
 from ..credentials import CredentialError, Credentials
 
 _CAPTURE_PREFIX = "JNU_CAPTURE:"
@@ -108,9 +106,6 @@ class _CapturePage(QWebEnginePage):
         super().javaScriptConsoleMessage(level, message, line_number, source_id)
 
 
-_LOGIN_PROFILE = None
-
-
 def _calibrate_client_hints(profile, user_agent):
     """对齐 Client Hints 品牌/版本，补上真实 Chrome 才有的 "Google Chrome" 品牌。
 
@@ -146,28 +141,18 @@ def _calibrate_client_hints(profile, user_agent):
         pass
 
 
-def _login_profile():
-    """进程内共享的持久化登录 profile（单例）。
+def _make_login_profile(parent):
+    """创建一个全新的 off-the-record 登录 profile（不落盘、无缓存，每次都全新）。
 
-    为什么是单例：持久化 profile 必须用带 storageName 的构造函数，且同名 +
-    同存储路径的 profile 在同一进程内不能并存（cookie 的 SQLite 会被占用、
-    Qt 也会告警）。而登录对话框可被多次开关（取消后重试），若每次都新建同名
-    持久化 profile 就会冲突。因此全进程共享一个，parent 挂到 QApplication，
-    使其贯穿应用生命周期；捕获钩子脚本与 UA / Client Hints 也只配置一次。
+    用不带 storageName 的构造函数得到 off-the-record profile：cookie /
+    localStorage / 缓存都只在内存里，不写磁盘，对话框一关就全部清掉。这样
+    每次打开都是干净的全新会话，不残留上一次的登录状态。parent 设为对话框，
+    随对话框一起销毁。
+
+    顺带配置好登录所需的伪装与捕获：UA 清洗、语言对齐 zh-CN（滑块能否通过的
+    关键）、Client Hints 补 Google Chrome、注入选课域的请求捕获钩子。
     """
-    global _LOGIN_PROFILE
-    if _LOGIN_PROFILE is not None:
-        return _LOGIN_PROFILE
-
-    os.makedirs(LOGIN_PROFILE_DIR, exist_ok=True)
-    os.makedirs(LOGIN_CACHE_DIR, exist_ok=True)
-
-    profile = QWebEngineProfile("jnu_login", QApplication.instance())
-    profile.setPersistentStoragePath(LOGIN_PROFILE_DIR)
-    profile.setCachePath(LOGIN_CACHE_DIR)
-    profile.setPersistentCookiesPolicy(
-        QWebEngineProfile.PersistentCookiesPolicy.ForcePersistentCookies
-    )
+    profile = QWebEngineProfile(parent)  # 无 storageName => off-the-record，不落盘
     # 去掉默认 UA 里的 "QtWebEngine/x.y.z " 标记，得到与底层 Chromium 版本
     # 一致的纯净 Chrome UA：既不暴露嵌入式浏览器身份，又保证 UA 与
     # Client Hints(sec-ch-ua) 版本号一致。该 UA 捕获时随请求头传给抢课端。
@@ -180,7 +165,7 @@ def _login_profile():
     profile.setHttpAcceptLanguage("zh-CN,zh;q=0.9,en;q=0.8")
     _calibrate_client_hints(profile, user_agent)
 
-    # 捕获钩子脚本只装一次（只在选课域生效，认证 / 滑块页保持原生）
+    # 捕获钩子脚本（只在选课域生效，认证 / 滑块页保持原生）
     target_host = QUrl(BASE_URL).host()
     script = QWebEngineScript()
     script.setName("jnu-capture-hook")
@@ -190,7 +175,6 @@ def _login_profile():
     script.setRunsOnSubFrames(True)
     profile.scripts().insert(script)
 
-    _LOGIN_PROFILE = profile
     return profile
 
 
@@ -221,16 +205,12 @@ class EmbeddedLoginDialog(QDialog):
         self._captured_request = None
         self._done = False
 
-        # 进程内共享的持久化登录 profile（落盘 + 持久 cookie + UA/Client Hints
-        # 校准 + 捕获钩子，详见 _login_profile）。持久化让易盾设备指纹跨启动
-        # 稳定、积累信誉，降低风控分（GOAL.md 根因 #1）。
-        self._profile = _login_profile()
+        # 全新的 off-the-record 登录 profile：不落盘、无缓存，每次打开都是干净
+        # 状态，不残留上次登录信息（含 UA 清洗 / 语言对齐 zh-CN / Client Hints /
+        # 捕获钩子，详见 _make_login_profile）。parent=self，随对话框一起销毁。
+        self._profile = _make_login_profile(self)
         self._user_agent = self._profile.httpUserAgent()
-        # profile 跨对话框存活，cookieAdded 连接需在关闭时断开（done 里处理），
-        # 否则对话框析构后槽函数仍被触发会崩溃。loadAllCookies 重新触发已
-        # 持久化 cookie 的 cookieAdded，确保复用 profile 时 self._cookies 也能填充。
         self._profile.cookieStore().cookieAdded.connect(self._on_cookie_added)
-        self._profile.cookieStore().loadAllCookies()
 
         self._page = _CapturePage(self._profile, self)
         self._page.captured.connect(self._on_request_captured)
@@ -342,13 +322,9 @@ class EmbeddedLoginDialog(QDialog):
 
     def done(self, result):
         # accept()/reject()/close() 都会经过这里（closeEvent 在 accept/reject
-        # 路径下不会触发）。profile 是进程内共享单例、不在此销毁，但必须断开
-        # 本对话框对 cookieAdded 的连接，否则对话框析构后槽函数仍被触发会崩溃。
-        try:
-            self._profile.cookieStore().cookieAdded.disconnect(self._on_cookie_added)
-        except (TypeError, RuntimeError):
-            pass
-        # 先排队销毁本对话框自己的 page（page 归属对话框，profile 归属 app）。
+        # 路径下不会触发）。先排队销毁 page，保证它先于 profile 析构，避免
+        # QtWebEngine 已知的析构顺序问题；profile/page 都随对话框销毁，
+        # off-the-record 会话不留任何磁盘痕迹。
         if self._page is not None:
             self._view.setPage(None)
             self._page.deleteLater()

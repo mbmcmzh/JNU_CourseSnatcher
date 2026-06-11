@@ -118,9 +118,10 @@ if os.environ.get("JNU_SNATCHER_USE_PROXY") != "1":
 
 这些不是决定性因素，但都能降低风控分，已经一并改进去了：
 
-- 登录 profile 持久化到 `%LOCALAPPDATA%/JNU_CourseSnatcher/`。原先每次启动
-  都是全新的临时 profile，在易盾看来就是"零信誉新设备"；落盘之后设备标识
-  跨启动稳定，信誉能积累下来。
+- 登录用 off-the-record（不落盘）会话：cookie / 缓存 / localStorage 都只在内存里，
+  窗口一关就清空，每次打开都是干净的全新状态，不残留上次的登录信息。
+  （早期试过把 profile 持久化来"攒设备信誉"，但既然语言对齐就解决了问题，
+  就改回每次全新，更干净也更省心。）
 - 给 `navigator.userAgentData` 的品牌列表补上真实 Chrome 才有的
   `Google Chrome` 项（读改写，保留 Qt 原有的 GREASE 品牌，避免越伪装破绽越多）。
 - UA 里去掉 `QtWebEngine/x.y.z` 字样，并把登录时捕获的真实 UA 透传给后续
