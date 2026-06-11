@@ -29,12 +29,17 @@ class Credentials:
     token: str
     student_code: str
     elective_batch_code: str
+    user_agent: str = USER_AGENT
 
     @property
     def headers(self):
-        """构造选课接口所需的请求头。"""
+        """构造选课接口所需的请求头。
+
+        User-Agent 取登录时浏览器实际使用的值，确保与登录会话一致
+        （服务端按 UA 绑定会话时不致失效，也更不易被风控识别）。
+        """
         return {
-            "User-Agent": USER_AGENT,
+            "User-Agent": self.user_agent,
             "cookie": self.cookie,
             "token": self.token,
         }
@@ -64,9 +69,12 @@ class Credentials:
                 "无法从请求体中解析到 xh（学号）或 xklcdm（选课批次），请确认已触发正确请求。"
             )
 
+        user_agent = get_header_case_insensitive(request_headers, "user-agent") or USER_AGENT
+
         return cls(
             cookie=cookie,
             token=token,
             student_code=student_code,
             elective_batch_code=elective_batch_code,
+            user_agent=user_agent,
         )

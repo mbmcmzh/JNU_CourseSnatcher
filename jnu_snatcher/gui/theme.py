@@ -28,13 +28,23 @@ STYLESHEET = f"""
     color: {TEXT};
 }}
 
-QMainWindow, QWidget#root {{
+QMainWindow {{
+    background: transparent;
+}}
+
+/* 无边框主窗口的圆角根容器（最大化时切回直角） */
+QWidget#root {{
     background: {BG};
+    border-radius: 14px;
+}}
+
+QWidget#root[winMaximized="true"] {{
+    border-radius: 0;
 }}
 
 /* ---------- 自定义标题栏 ---------- */
 QWidget#titleBar {{
-    background: {BG};
+    background: transparent;
     border-bottom: 1px solid {BORDER};
 }}
 
@@ -320,9 +330,9 @@ QMessageBox {{
     background: {SURFACE};
 }}
 
-/* ---------- 内嵌登录对话框 ---------- */
-QDialog {{
+/* ---------- 内嵌登录对话框（圆角由 setMask 裁出） ---------- */
+QDialog#embeddedLogin {{
     background: {BG};
-    border: 1px solid {BORDER};
+    border-radius: 12px;
 }}
 """

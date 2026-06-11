@@ -1,6 +1,6 @@
 """主窗口。"""
 
-from PyQt6.QtCore import Qt, QThread, pyqtSlot
+from PyQt6.QtCore import QEvent, Qt, QThread, pyqtSlot
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -82,6 +82,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("暨南大学抢课助手")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # 让窗口四角透明，根容器的圆角才能显示出来
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(1000, 780)
         self.setMinimumSize(880, 700)
 
@@ -297,6 +299,16 @@ class MainWindow(QMainWindow):
 
         return log_card
 
+    def changeEvent(self, event):
+        # 最大化铺满屏幕时去掉圆角，恢复时再加回来。
+        # 注意不能叫 "maximized"：那是 QWidget 内置只读属性，写不进去。
+        if event.type() == QEvent.Type.WindowStateChange:
+            root = self.centralWidget()
+            root.setProperty("winMaximized", self.isMaximized())
+            root.style().unpolish(root)
+            root.style().polish(root)
+        super().changeEvent(event)
+
     # ---------- 状态管理 ----------
 
     def _set_state(self, state):
@@ -350,10 +362,18 @@ class MainWindow(QMainWindow):
         self._set_state(STATE_SNIFFING)
         self.append_log("已打开内嵌浏览器，请完成登录...")
 
-        dialog = EmbeddedLoginDialog(self)
+        try:
+            dialog = EmbeddedLoginDialog(self)
+        except Exception as exc:  # WebEngine 运行时初始化失败兜底，避免界面卡死
+            self.show_error(f"内嵌浏览器启动失败：{exc}")
+            self._set_state(STATE_INITIAL)
+            return
+
         dialog.log.connect(self.append_log)
         dialog.credentials_captured.connect(self.on_credentials_ready)
         dialog.exec()
+        # 对话框是主窗口的子对象，不主动释放会带着 WebEngine 资源活到退出
+        dialog.deleteLater()
 
         if not self.credentials:
             self.append_log("登录窗口已关闭，未捕获到凭据。")
