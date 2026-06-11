@@ -3,7 +3,7 @@ build/
 dist/
 resources/
 build.py
-*.spec
+# JNU_CourseSnatcher.spec 是手维护的打包配置，纳入版本库（故不忽略 *.spec）
 
 # 排除其他文档文件（但保留项目README）
 readme.md

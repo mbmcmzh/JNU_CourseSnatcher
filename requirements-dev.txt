@@ -1,2 +1,3 @@
 -r requirements.txt
 pytest
+pyinstaller  # 打包单文件 exe：pyinstaller JNU_CourseSnatcher.spec --noconfirm --clean
